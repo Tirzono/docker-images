@@ -3,10 +3,6 @@
 Container images built here and published to GHCR. One directory per image;
 each is a `Dockerfile` and nothing else.
 
-The repository is public so that its Actions minutes are not billed, and so the
-packages can be pulled without a credential — which is most of the point, since
-a private image means an `imagePullSecret` wherever it is used.
-
 ## What is in here
 
 | Image | What it is |
@@ -50,6 +46,11 @@ down a second time: `actions-runner:2.337.0` is "the official 2.337.0, with
 this repository's additions". That gives the chain one version to follow —
 Renovate bumps the `FROM` pin here, merging publishes the matching tag, and
 whatever pins the image downstream sees a new tag to move to.
+
+That first step runs unattended: a minor or patch bump to a base image or an
+action is merged by Renovate once the build is green, so an upstream release
+turns into a published tag on its own. A major is left open for someone to
+look at.
 
 Between the build and the push, the image is checked for the things it exists
 to provide — `msgfmt` runs, `libatomic.so.1` is present — and for the two parts

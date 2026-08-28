@@ -5,11 +5,9 @@ name: build
 # `pull_request` trigger: it would either build every commit twice or leave a
 # row of skipped checks behind.
 #
-# This runs on a GitHub-hosted runner rather than on a self-hosted one for two
-# reasons. It could not run on the images published here -- building an image
-# needs a Docker daemon, and a scale-set runner pod has none unless it is given
-# a privileged sidecar -- and it does not need to: this repository is public,
-# so its minutes are not billed.
+# This runs on a GitHub-hosted runner rather than on one of the images
+# published here: building an image needs a Docker daemon, and a scale-set
+# runner pod has none unless it is given a privileged sidecar.
 on:
   push:
   workflow_dispatch:
