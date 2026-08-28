@@ -7,8 +7,32 @@
     "Two things get bumped here, and config:recommended finds both without",
     "help: the `FROM` pin in each image's Dockerfile, and the actions each",
     "workflow `uses:`.",
-    "Nothing automerges. A base image bump changes what every job using the",
-    "image runs on, and the tag published from it is the one consumers pin,",
-    "so it is worth a pair of eyes."
-  ]
+    "Renovate does the merging itself rather than handing the pull request to",
+    "GitHub's auto-merge, which needs the repository setting turned on and a",
+    "required check configured on the branch to wait for anything -- without",
+    "those it merges the moment the pull request opens, before the build has",
+    "run. Renovate waits for the branch to be green either way."
+  ],
+  "packageRules": [
+    {
+      "description": [
+        "A new upstream release should become a published tag without waiting",
+        "for someone to click merge, since merging to the default branch is",
+        "what publishes and the build has already checked the image does what",
+        "it exists to do. Majors are left for a person: a new major of a base",
+        "image is a different image, and of an action, a changed contract."
+      ],
+      "matchManagers": [
+        "dockerfile",
+        "github-actions"
+      ],
+      "matchUpdateTypes": [
+        "minor",
+        "patch",
+        "digest"
+      ],
+      "automerge": true
+    }
+  ],
+  "platformAutomerge": false
 }
