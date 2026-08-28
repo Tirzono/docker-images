@@ -1,0 +1,122 @@
+name: build
+
+# Every branch, so a branch is green before it becomes a pull request, and
+# GitHub attaches the run to the pull request for you. There is deliberately no
+# `pull_request` trigger: it would either build every commit twice or leave a
+# row of skipped checks behind.
+#
+# This runs on a GitHub-hosted runner rather than on a self-hosted one for two
+# reasons. It could not run on the images published here -- building an image
+# needs a Docker daemon, and a scale-set runner pod has none unless it is given
+# a privileged sidecar -- and it does not need to: this repository is public,
+# so its minutes are not billed.
+on:
+  push:
+  workflow_dispatch:
+
+concurrency:
+  group: build-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  build:
+    name: ${{ matrix.image }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # One entry per directory. Adding an image is a directory, a Dockerfile
+        # and a line here.
+        image:
+          - actions-runner
+    steps:
+      - uses: actions/checkout@v4
+
+      # The tag is the base image's, read out of the FROM line rather than
+      # written down a second time here. `actions-runner:2.337.0` means "the
+      # official 2.337.0, with this repository's additions", which is the only
+      # version this image has of its own. Renovate bumps the pin, merging
+      # publishes the matching tag, and whatever pins the image downstream
+      # sees a new tag to move to.
+      - name: Tag from the base image
+        id: version
+        run: |
+          set -euo pipefail
+          tag=$(sed -n 's/^FROM [^:]*:\(.*\)$/\1/p' "${{ matrix.image }}/Dockerfile" | head -1)
+          if [ -z "$tag" ]; then
+            echo "::error::no tag on the FROM line in ${{ matrix.image }}/Dockerfile"
+            exit 1
+          fi
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Log in to the container registry
+        if: github.ref == format('refs/heads/{0}', github.event.repository.default_branch)
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # metadata-action rather than the tags by hand, because it lowercases
+      # the owner: GHCR rejects a repository path with a capital in it, and
+      # account names are not always lowercase.
+      - name: Image metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ghcr.io/${{ github.repository_owner }}/${{ matrix.image }}
+          tags: |
+            type=raw,value=${{ steps.version.outputs.tag }}
+            type=raw,value=latest,enable={{is_default_branch}}
+
+      # Built once, checked, then pushed. The push reuses the layers the
+      # build just wrote, so the second step is a cache hit rather than a
+      # second build.
+      - name: Build
+        uses: docker/build-push-action@v6
+        with:
+          context: ${{ matrix.image }}
+          load: true
+          # amd64 only, which is what these are consumed on. arm64 would be
+          # emulated here and nothing has asked for it.
+          platforms: linux/amd64
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      # What the image is for is what it has to be able to do. The first two
+      # are the libraries the official runner image is missing; the second two
+      # are the contract the scale set chart relies on, which is the thing an
+      # image like this can quietly break.
+      - name: The image has what it was built for
+        run: |
+          set -euo pipefail
+          image=$(echo "${{ steps.meta.outputs.tags }}" | head -n 1)
+          docker run --rm --entrypoint sh "$image" -c '
+            set -eu
+            msgfmt --version > /dev/null
+            ls /usr/lib/*/libatomic.so.1 > /dev/null
+            test -x /home/runner/run.sh
+            [ "$(id -un)" = runner ]
+          '
+
+      - name: Push
+        # A branch builds and is checked and stops there; only the default
+        # branch publishes. Consumers pin one immutable tag, so a tag that
+        # moved under them would be a deploy nobody asked for.
+        if: github.ref == format('refs/heads/{0}', github.event.repository.default_branch)
+        uses: docker/build-push-action@v6
+        with:
+          context: ${{ matrix.image }}
+          push: true
+          platforms: linux/amd64
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
