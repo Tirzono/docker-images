@@ -1,0 +1,14 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "extends": [
+    "config:recommended"
+  ],
+  "description": [
+    "Two things get bumped here, and config:recommended finds both without",
+    "help: the `FROM` pin in each image's Dockerfile, and the actions each",
+    "workflow `uses:`.",
+    "Nothing automerges. A base image bump changes what every job using the",
+    "image runs on, and the tag published from it is the one consumers pin,",
+    "so it is worth a pair of eyes."
+  ]
+}
