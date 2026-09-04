@@ -77,7 +77,7 @@ jobs:
       # build just wrote, so the second step is a cache hit rather than a
       # second build.
       - name: Build
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@v7
         with:
           context: ${{ matrix.image }}
           load: true
@@ -110,7 +110,7 @@ jobs:
         # branch publishes. Consumers pin one immutable tag, so a tag that
         # moved under them would be a deploy nobody asked for.
         if: github.ref == format('refs/heads/{0}', github.event.repository.default_branch)
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@v7
         with:
           context: ${{ matrix.image }}
           push: true
