@@ -32,7 +32,7 @@ jobs:
         image:
           - actions-runner
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       # The tag is the base image's, read out of the FROM line rather than
       # written down a second time here. `actions-runner:2.337.0` means "the
