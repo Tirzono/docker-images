@@ -8,6 +8,7 @@ each is a `Dockerfile` and nothing else.
 | Image | What it is |
 | --- | --- |
 | [`actions-runner`](actions-runner/) | The official GitHub Actions runner, plus two libraries jobs commonly need |
+| [`actions-runner-android`](actions-runner-android/) | The official runner, plus an Android SDK directory the Gradle plugin can fill |
 
 ### `actions-runner`
 
@@ -36,6 +37,24 @@ at all. It is also why the fuller third-party runner images are no use with
 that chart — they register themselves from environment variables, which is the
 older, pre-scale-set model.
 
+### `actions-runner-android`
+
+For Android builds, which have needed `ubuntu-latest` only because it ships an
+SDK. What the Android Gradle Plugin needs from the machine is less than that:
+`ANDROID_HOME` pointing at a directory it can write to, with the SDK licences
+already accepted there. Given those, it downloads the platform and build-tools
+the project names by itself, so a `compileSdk` bump is a change to the app and
+not to this image.
+
+So the SDK here is empty apart from `licenses/`, and `/opt/android-sdk` belongs
+to `runner`. There is no JDK either: the workflow brings its own with
+`actions/setup-java`, as it does on `ubuntu-latest`. The price is a platform
+and build-tools download at the start of each job, since every runner pod
+starts from the image.
+
+It carries `libatomic1` as `actions-runner` does, and `unzip`; not `gettext`,
+which an Android build has no use for.
+
 ## How a build works
 
 Every push builds. Only the default branch publishes, because a deployment
@@ -53,7 +72,9 @@ turns into a published tag on its own. A major is left open for someone to
 look at.
 
 Between the build and the push, the image is checked for the things it exists
-to provide — `msgfmt` runs, `libatomic.so.1` is present — and for the two parts
+to provide — for `actions-runner`, that `msgfmt` runs and `libatomic.so.1` is
+present; for `actions-runner-android`, that `ANDROID_HOME` is set, writable and
+has the SDK licence accepted — and for the two parts
 of the chart's contract that are easy to break silently: `/home/runner/run.sh`
 is executable, and the default user is `runner`.
 

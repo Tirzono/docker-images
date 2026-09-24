@@ -31,6 +31,7 @@ jobs:
         # and a line here.
         image:
           - actions-runner
+          - actions-runner-android
     steps:
       - uses: actions/checkout@v4
 
@@ -89,21 +90,42 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
-      # What the image is for is what it has to be able to do. The first two
-      # are the libraries the official runner image is missing; the second two
-      # are the contract the scale set chart relies on, which is the thing an
-      # image like this can quietly break.
+      # What the image is for is what it has to be able to do, and then the
+      # two parts of the chart's contract that an image like this can quietly
+      # break: /home/runner/run.sh is executable and the default user is
+      # `runner`. Each image's own checks are its case below.
       - name: The image has what it was built for
+        env:
+          IMAGE: ${{ matrix.image }}
         run: |
           set -euo pipefail
           image=$(echo "${{ steps.meta.outputs.tags }}" | head -n 1)
-          docker run --rm --entrypoint sh "$image" -c '
+          case "$IMAGE" in
+            actions-runner)
+              checks='
+                msgfmt --version > /dev/null
+                ls /usr/lib/*/libatomic.so.1 > /dev/null
+              ' ;;
+            actions-runner-android)
+              # The SDK is empty on purpose, so what is checked is what lets
+              # AGP fill it: the variable, the accepted licence, and that the
+              # runner user can write there.
+              checks='
+                ls /usr/lib/*/libatomic.so.1 > /dev/null
+                test "$ANDROID_HOME" = /opt/android-sdk
+                grep -q 24333f8a63b6825ea9c5514f83c2829b004d1fee "$ANDROID_HOME/licenses/android-sdk-license"
+                test -w "$ANDROID_HOME"
+              ' ;;
+            *)
+              echo "::error::no checks for $IMAGE in build.yml"
+              exit 1 ;;
+          esac
+          docker run --rm --entrypoint sh "$image" -c "
             set -eu
-            msgfmt --version > /dev/null
-            ls /usr/lib/*/libatomic.so.1 > /dev/null
+            $checks
             test -x /home/runner/run.sh
-            [ "$(id -un)" = runner ]
-          '
+            [ \"\$(id -un)\" = runner ]
+          "
 
       - name: Push
         # A branch builds and is checked and stops there; only the default
