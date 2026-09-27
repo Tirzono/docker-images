@@ -9,6 +9,7 @@ each is a `Dockerfile` and nothing else.
 | --- | --- |
 | [`actions-runner`](actions-runner/) | The official GitHub Actions runner, plus two libraries jobs commonly need |
 | [`actions-runner-android`](actions-runner-android/) | The official runner, plus an Android SDK directory the Gradle plugin can fill |
+| [`fdroidserver`](fdroidserver/) | Debian's fdroidserver, plus boto3 and click, for publishing an F-Droid repository |
 
 ### `actions-runner`
 
@@ -55,6 +56,20 @@ starts from the image.
 It carries `libatomic1` as `actions-runner` does, and `unzip`; not `gettext`,
 which an Android build has no use for.
 
+### `fdroidserver`
+
+What Tirzono/k8s `fdroid/` runs to publish the F-Droid repository at
+apps.ten-pas.nl: `fdroid update` over the apps' release APKs, then an upload
+to Garage. Its script lives in a ConfigMap there; this is only what it calls
+and imports.
+
+It is Debian's `fdroidserver` package, which brings apksigner and the JDK it
+needs to sign the index, rather than F-Droid's own images, which are a full
+build server of several GB. The tag is the Debian base's, as for the runner
+images, so the fdroidserver inside is whatever that release carries. It runs
+as uid 1000, `fdroid`, not `runner`, and is not a runner image, so the
+chart's contract does not apply to it.
+
 ## How a build works
 
 Every push builds. Only the default branch publishes, because a deployment
@@ -75,8 +90,8 @@ Between the build and the push, the image is checked for the things it exists
 to provide — for `actions-runner`, that `msgfmt` runs and `libatomic.so.1` is
 present; for `actions-runner-android`, that `ANDROID_HOME` is set, writable and
 has the SDK licence accepted — and for the two parts
-of the chart's contract that are easy to break silently: `/home/runner/run.sh`
-is executable, and the default user is `runner`.
+of the chart's contract that are easy to break silently, for the runner images:
+`/home/runner/run.sh` is executable, and the default user is `runner`.
 
 Builds run on GitHub-hosted runners. An image build needs a Docker daemon,
 which a scale-set runner pod does not have unless it is given a privileged

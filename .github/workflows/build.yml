@@ -32,6 +32,7 @@ jobs:
         image:
           - actions-runner
           - actions-runner-android
+          - fdroidserver
     steps:
       - uses: actions/checkout@v4
 
@@ -90,10 +91,10 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
-      # What the image is for is what it has to be able to do, and then the
-      # two parts of the chart's contract that an image like this can quietly
-      # break: /home/runner/run.sh is executable and the default user is
-      # `runner`. Each image's own checks are its case below.
+      # What the image is for is what it has to be able to do, and then, for
+      # the runner images, the two parts of the chart's contract that an image
+      # like this can quietly break: /home/runner/run.sh is executable and the
+      # default user is `runner`. Each image's own checks are its case below.
       - name: The image has what it was built for
         env:
           IMAGE: ${{ matrix.image }}
@@ -116,15 +117,29 @@ jobs:
                 grep -q 24333f8a63b6825ea9c5514f83c2829b004d1fee "$ANDROID_HOME/licenses/android-sdk-license"
                 test -w "$ANDROID_HOME"
               ' ;;
+            fdroidserver)
+              # What publish.py in Tirzono/k8s fdroid/ runs and imports, as
+              # the non-root user the CronJob runs it as.
+              checks='
+                fdroid --version > /dev/null
+                apksigner --version > /dev/null
+                python3 -c "import boto3, click, requests, yaml"
+                [ "$(id -u)" = 1000 ]
+              ' ;;
             *)
               echo "::error::no checks for $IMAGE in build.yml"
               exit 1 ;;
           esac
+          case "$IMAGE" in
+            actions-runner*)
+              checks="$checks
+                test -x /home/runner/run.sh
+                [ \"\$(id -un)\" = runner ]
+              " ;;
+          esac
           docker run --rm --entrypoint sh "$image" -c "
             set -eu
             $checks
-            test -x /home/runner/run.sh
-            [ \"\$(id -un)\" = runner ]
           "
 
       - name: Push
