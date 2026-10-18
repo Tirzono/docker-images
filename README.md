@@ -1,7 +1,7 @@
 # docker-images
 
-Container images built here and published to GHCR. One directory per image;
-each is a `Dockerfile` and nothing else.
+Container images built here and published to GHCR. One directory per image:
+a `Dockerfile`, and for `analytics-mcp` the two files it copies in.
 
 ## What is in here
 
@@ -9,6 +9,7 @@ each is a `Dockerfile` and nothing else.
 | --- | --- |
 | [`actions-runner`](actions-runner/) | The official GitHub Actions runner, plus two libraries jobs commonly need |
 | [`actions-runner-android`](actions-runner-android/) | The official runner, plus an Android SDK directory the Gradle plugin can fill |
+| [`analytics-mcp`](analytics-mcp/) | Google's Analytics MCP server, served over streamable HTTP |
 
 ### `actions-runner`
 
@@ -55,6 +56,52 @@ starts from the image.
 It carries `libatomic1` as `actions-runner` does, and `unzip`; not `gettext`,
 which an Android build has no use for.
 
+### `analytics-mcp`
+
+[Google's MCP server for Google Analytics][ga-mcp] ships as a PyPI package
+with a stdio transport and no image. This is that package, installed from a
+lock, and `server.py`: a few dozen lines that hand upstream's own server
+object to the MCP SDK's streamable-HTTP session manager, so a client sees
+upstream's tools unchanged. Tirzono/k8s `analytics-mcp/` runs it, behind
+Cloudflare Access.
+
+**No credential is in the image, and the build refuses to push one.** The
+Dockerfile copies `requirements.txt` and `server.py` by name, never the
+directory, so nothing lying beside them is swept in; and before the push the
+build checks that `/app` holds exactly those two files, that nothing in it
+looks like a private key or a Google credentials file, and that
+`GOOGLE_APPLICATION_CREDENTIALS` is not set. How the server proves who it is
+to Google arrives where it runs -- in the cluster, a short-lived token
+Kubernetes issues to the pod, exchanged with Google for one that lasts an
+hour. There is no key anywhere to bake in.
+
+The server will not start without `MCP_ALLOWED_HOSTS`, the Host header(s)
+clients reach it by: anything else gets a 421, and any request from a browser
+(one carrying `Origin`) a 403. Neither is authentication; whatever is in
+front of it has to be. The build starts it and checks all three answers.
+
+`requirements.txt` pins every package with a hash for every file, compiled
+from `requirements.in`, and the install is wheels only with nothing resolved.
+Renovate bumps `requirements.in` and re-locks through its `pip-compile`
+manager; by hand, from `analytics-mcp/`:
+
+```
+uv pip compile requirements.in -o requirements.txt --universal \
+  --generate-hashes --python-version 3.13 --upgrade
+```
+
+`--upgrade` also moves every transitive package, which nothing else does.
+
+Its tag is not its base's alone, because its base is not what it is:
+`0.7.0-3.13.16` is analytics-mcp 0.7.0 on Python 3.13.16, and a bump to
+either publishes a new tag. A re-lock that moves neither -- `--upgrade` with
+analytics-mcp unchanged -- republishes the same tag, as a rebuild of the
+runner images does, and a pod already running it keeps what it pulled until
+one of the two versions moves. Python is held on 3.13 (renovate.json) until
+the lock is recompiled for a newer one.
+
+[ga-mcp]: https://github.com/googleanalytics/google-analytics-mcp
+
 ## How a build works
 
 Every push builds. Only the default branch publishes, because a deployment
@@ -76,7 +123,9 @@ to provide — for `actions-runner`, that `msgfmt` runs and `libatomic.so.1` is
 present; for `actions-runner-android`, that `ANDROID_HOME` is set, writable and
 has the SDK licence accepted — and for the two parts
 of the chart's contract that are easy to break silently: `/home/runner/run.sh`
-is executable, and the default user is `runner`.
+is executable, and the default user is `runner`. `analytics-mcp` is not a
+runner, so instead it is checked for what it must not carry and for what it
+must answer; its section above has both.
 
 Builds run on GitHub-hosted runners. An image build needs a Docker daemon,
 which a scale-set runner pod does not have unless it is given a privileged

@@ -32,6 +32,7 @@ jobs:
         image:
           - actions-runner
           - actions-runner-android
+          - analytics-mcp
     steps:
       - uses: actions/checkout@v4
 
@@ -41,14 +42,30 @@ jobs:
       # version this image has of its own. Renovate bumps the pin, merging
       # publishes the matching tag, and whatever pins the image downstream
       # sees a new tag to move to.
+      #
+      # analytics-mcp is the one image whose base is not what it is. It is
+      # Google's package on a stock Python, so its tag is both versions --
+      # `0.7.0-3.13.16` is analytics-mcp 0.7.0 on Python 3.13.16 -- read out
+      # of requirements.in and the FROM line in the same way, and a bump to
+      # either publishes a new tag.
       - name: Tag from the base image
         id: version
+        env:
+          IMAGE: ${{ matrix.image }}
         run: |
           set -euo pipefail
-          tag=$(sed -n 's/^FROM [^:]*:\(.*\)$/\1/p' "${{ matrix.image }}/Dockerfile" | head -1)
+          tag=$(sed -n 's/^FROM [^:]*:\(.*\)$/\1/p' "$IMAGE/Dockerfile" | head -1)
           if [ -z "$tag" ]; then
-            echo "::error::no tag on the FROM line in ${{ matrix.image }}/Dockerfile"
+            echo "::error::no tag on the FROM line in $IMAGE/Dockerfile"
             exit 1
+          fi
+          if [ "$IMAGE" = analytics-mcp ]; then
+            version=$(sed -n 's/^analytics-mcp==\([0-9.]*\)$/\1/p' "$IMAGE/requirements.in")
+            if [ -z "$version" ]; then
+              echo "::error::no pinned analytics-mcp in $IMAGE/requirements.in"
+              exit 1
+            fi
+            tag="$version-${tag%-slim}"
           fi
           echo "tag=$tag" >> "$GITHUB_OUTPUT"
 
@@ -90,10 +107,10 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
-      # What the image is for is what it has to be able to do, and then the
-      # two parts of the chart's contract that an image like this can quietly
-      # break: /home/runner/run.sh is executable and the default user is
-      # `runner`. Each image's own checks are its case below.
+      # What the image is for is what it has to be able to do, and for the
+      # runner images the two parts of the chart's contract that an image like
+      # them can quietly break: /home/runner/run.sh is executable and the
+      # default user is `runner`. Each image's own checks are its case below.
       - name: The image has what it was built for
         env:
           IMAGE: ${{ matrix.image }}
@@ -116,6 +133,21 @@ jobs:
                 grep -q 24333f8a63b6825ea9c5514f83c2829b004d1fee "$ANDROID_HOME/licenses/android-sdk-license"
                 test -w "$ANDROID_HOME"
               ' ;;
+            analytics-mcp)
+              # Not a runner, so none of the chart's contract -- what is
+              # checked instead is that nothing but its two files went in and
+              # nothing in it can authenticate: no key in /app, no credentials
+              # variable baked into the environment. The image must run as
+              # 1000 for the pod's runAsNonRoot. That it serves MCP is the next
+              # step's.
+              docker run --rm --entrypoint sh "$image" -c '
+                set -eu
+                [ "$(ls -A /app | tr "\n" " ")" = "requirements.txt server.py " ]
+                if grep -rlE "PRIVATE KEY|\"type\": *\"(service_account|external_account|authorized_user)\"" /app; then exit 1; fi
+                [ -z "${GOOGLE_APPLICATION_CREDENTIALS:-}" ]
+                [ "$(id -u)" = 1000 ]
+              '
+              exit 0 ;;
             *)
               echo "::error::no checks for $IMAGE in build.yml"
               exit 1 ;;
@@ -126,6 +158,37 @@ jobs:
             test -x /home/runner/run.sh
             [ \"\$(id -un)\" = runner ]
           "
+
+      # That it answers MCP over HTTP, and refuses what it should: a request
+      # for another Host (421) and one from a browser (403). Without
+      # credentials, which is the point -- tools/list needs none, so this
+      # proves the server is upstream's and is up without anything to leak.
+      # And that it will not start at all without a host allowlist.
+      - name: The server answers, and refuses
+        if: matrix.image == 'analytics-mcp'
+        run: |
+          set -euo pipefail
+          image=$(echo "${{ steps.meta.outputs.tags }}" | head -n 1)
+          if docker run --rm "$image" > /dev/null 2>&1; then
+            echo "::error::started without MCP_ALLOWED_HOSTS"
+            exit 1
+          fi
+          docker run -d --name mcp -p 8000:8000 -e MCP_ALLOWED_HOSTS=mcp.test "$image"
+          trap 'docker logs mcp; docker rm -f mcp > /dev/null' EXIT
+          post() {
+            curl -sS -o /tmp/body -w '%{http_code}' -X POST http://127.0.0.1:8000/mcp \
+              -H 'Content-Type: application/json' \
+              -H 'Accept: application/json, text/event-stream' "$@"
+          }
+          list='{"jsonrpc":"2.0","id":1,"method":"tools/list"}'
+          for _ in $(seq 60); do
+            [ "$(post -H 'Host: mcp.test' -d "$list" 2> /dev/null)" = 200 ] && break
+            sleep 1
+          done
+          [ "$(post -H 'Host: mcp.test' -d "$list")" = 200 ]
+          jq -e '.result.tools | map(.name) | index("run_report")' /tmp/body > /dev/null
+          [ "$(post -H 'Host: elsewhere.test' -d "$list")" = 421 ]
+          [ "$(post -H 'Host: mcp.test' -H 'Origin: https://elsewhere.test' -d "$list")" = 403 ]
 
       - name: Push
         # A branch builds and is checked and stops there; only the default
