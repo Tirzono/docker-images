@@ -13,6 +13,14 @@
     "those it merges the moment the pull request opens, before the build has",
     "run. Renovate waits for the branch to be green either way."
   ],
+  "pip-compile": {
+    "managerFilePatterns": [
+      "/(^|/)analytics-mcp/requirements\\.txt$/"
+    ]
+  },
+  "pip_requirements": {
+    "enabled": false
+  },
   "packageRules": [
     {
       "description": [
@@ -32,6 +40,33 @@
         "digest"
       ],
       "automerge": true
+    },
+    {
+      "description": [
+        "analytics-mcp's requirements.txt is a lock compiled for Python 3.13",
+        "(the `--python-version 3.13` in its header), installed into the stock",
+        "python image. A new minor of the image alone would install 3.13's lock",
+        "on 3.14, so the image stays on 3.13 until someone recompiles the lock",
+        "for the next minor in the same pull request. Patch releases of 3.13 come",
+        "through, and merge themselves, under the rule above.",
+        "The lock itself is the pip-compile manager's: it reads the `uv pip",
+        "compile` command out of requirements.txt, bumps requirements.in and",
+        "re-locks. Those bumps are not merged automatically -- a new release of",
+        "an experimental package that reads analytics is worth a look first.",
+        "pip_requirements is off because the pip-compile manager's documentation",
+        "asks for it: it would otherwise read the lock too and bump its pins one",
+        "at a time, under it."
+      ],
+      "matchDatasources": [
+        "docker"
+      ],
+      "matchPackageNames": [
+        "python"
+      ],
+      "matchFileNames": [
+        "analytics-mcp/Dockerfile"
+      ],
+      "allowedVersions": "<3.14"
     }
   ],
   "platformAutomerge": false

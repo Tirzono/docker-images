@@ -1,0 +1,5 @@
+# What server.py imports. requirements.txt is the lock compiled from this;
+# the README has the command, and Renovate re-runs it.
+analytics-mcp==0.7.0
+starlette
+uvicorn
