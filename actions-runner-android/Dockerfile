@@ -23,7 +23,7 @@
 #
 # Renovate bumps this pin, and the tag published from it is read back out of
 # this line. See .github/workflows/build.yml.
-FROM ghcr.io/actions/actions-runner:2.338.1
+FROM ghcr.io/actions/actions-runner:2.338.2
 
 USER root
 
